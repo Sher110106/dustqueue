@@ -3,7 +3,7 @@
 - Project title: DustQueue
 - Team: Quad
 - Track: Air
-- Repository: to be filled after the public repository is created
+- Repository: https://github.com/Sher110106/dustqueue
 - Live URL: local/static URL until AWS service activation is complete
 - Video URL: to be filled after recording
 - Builder Center blog: to be filled after publishing
