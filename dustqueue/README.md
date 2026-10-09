@@ -53,7 +53,7 @@ The heuristic is code in `src/domain/score.ts`; it has no LLM dependency. It is 
 
 The template intentionally uses least-privilege data actions: the function can query/get/put/update only the sites table and can put/head only `sessions/*` objects in the evidence bucket. Set `AllowOrigin` to the CloudFront origin for a production deployment instead of the demo default `*`.
 
-The deployment helper is `deploy/deploy.sh`. The current AWS Free project is signed in as `envhacks` in `ap-south-1`, but CloudFormation, Lambda, DynamoDB, S3 and CloudFront currently report `SubscriptionRequired`, `OptInRequired` or `NotSignedUp` until the project activates the needed services. Read `deploy/PREFLIGHT.md` before running deployment.
+The deployment helper is `deploy/deploy.sh`. The account is on the Paid plan, but Lambda and S3 still report subscription/activation errors. AWS Organizations confirms this is not a managed AWS Settings project; the earlier advice to activate Advanced Features was incorrect. Signup completion or activation must be resolved first. See `deploy/PREFLIGHT.md` for the current evidence.
 
 ## Three-minute demo script
 
