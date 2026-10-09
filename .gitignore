@@ -1,0 +1,8 @@
+.DS_Store
+.aws-sam/
+node_modules/
+dist/
+dustqueue/node_modules/
+dustqueue/.aws-sam/
+dustqueue/dist/
+dustqueue/deploy/out/

@@ -1,0 +1,204 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: DustQueue Air track - session-isolated inspection queue for ap-south-1
+Parameters:
+  AllowOrigin:
+    Type: String
+    Default: '*'
+    Description: Demo origin. Set to the CloudFront origin in a real deployment.
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Timeout: 15
+    MemorySize: 512
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        SITES_TABLE: !Ref SitesTable
+        EVIDENCE_BUCKET: !Ref EvidenceBucket
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
+Resources:
+  DustQueueApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: '$default'
+      CorsConfiguration:
+        AllowOrigins: [!Ref AllowOrigin]
+        AllowHeaders: [content-type, x-demo-session]
+        AllowMethods: [GET, PATCH, POST, OPTIONS]
+        MaxAge: 600
+      DefaultRouteSettings:
+        DetailedMetricsEnabled: true
+  DustQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/
+      Handler: index.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: SitesReadWriteBySession
+              Effect: Allow
+              Action: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query']
+              Resource: !GetAtt SitesTable.Arn
+            - Sid: EvidenceObjectWriteAndVerify
+              Effect: Allow
+              Action: ['s3:GetObject', 's3:PutObject', 's3:HeadObject']
+              Resource: !Sub '${EvidenceBucket.Arn}/sessions/*'
+            - Sid: LambdaLogs
+              Effect: Allow
+              Action: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents']
+              Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*'
+      Events:
+        GetSites:
+          Type: HttpApi
+          Properties: { ApiId: !Ref DustQueueApi, Path: /sites, Method: GET }
+        PatchSite:
+          Type: HttpApi
+          Properties: { ApiId: !Ref DustQueueApi, Path: '/sites/{id}', Method: PATCH }
+        PresignEvidence:
+          Type: HttpApi
+          Properties: { ApiId: !Ref DustQueueApi, Path: '/sites/{id}/evidence/presign', Method: POST }
+        ConfirmEvidence:
+          Type: HttpApi
+          Properties: { ApiId: !Ref DustQueueApi, Path: '/sites/{id}/evidence/confirm', Method: POST }
+  SitesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: sessionId
+          AttributeType: S
+        - AttributeName: siteId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sessionId
+          KeyType: HASH
+        - AttributeName: siteId
+          KeyType: RANGE
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true }
+      Tags:
+        - Key: app
+          Value: dustqueue
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: [!Ref AllowOrigin]
+            AllowedMethods: [PUT, HEAD]
+            AllowedHeaders: ['*']
+            ExposedHeaders: [ETag]
+            MaxAge: 300
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireDemoEvidence
+            Status: Enabled
+            ExpirationInDays: 30
+  EvidenceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref EvidenceBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt EvidenceBucket.Arn
+              - !Sub '${EvidenceBucket.Arn}/*'
+            Condition: { Bool: { 'aws:SecureTransport': 'false' } }
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  WebOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-web-oac'
+        Description: Private CloudFront access to DustQueue frontend bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        Origins:
+          - Id: DustQueueWebOrigin
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !Ref WebOriginAccessControl
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: DustQueueWebOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          ForwardedValues: { QueryString: false, Cookies: { Forward: none } }
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        PriceClass: PriceClass_100
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt WebBucket.Arn
+              - !Sub '${WebBucket.Arn}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+          - Sid: AllowCloudFrontReadOnly
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub '${WebBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}'
+Outputs:
+  ApiBaseUrl:
+    Description: Set VITE_API_BASE_URL to this URL for the browser API adapter.
+    Value: !Sub 'https://${DustQueueApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+  SitesTableName:
+    Value: !Ref SitesTable
+  EvidenceBucketName:
+    Value: !Ref EvidenceBucket
+  WebBucketName:
+    Value: !Ref WebBucket
+  CloudFrontUrl:
+    Value: !Sub 'https://${WebDistribution.DomainName}'
+  CloudFrontDistributionId:
+    Value: !Ref WebDistribution
