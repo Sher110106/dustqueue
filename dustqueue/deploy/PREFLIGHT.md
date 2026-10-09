@@ -19,6 +19,8 @@ The earlier advice to activate **Advanced Features** was unsupported and should 
 
 The current evidence points to unfinished signup verification or service activation that has not completed. The exact remaining verification step has not been established. An Account Management state of ACTIVE and valid STS credentials are not evidence that resource APIs are ready.
 
+Latest retry after the Paid upgrade (2026-10-09 17:02 UTC): `AccountState: ACTIVE`, `accountPlanType: PAID`, but Lambda still returns `SubscriptionRequiredException`, S3 returns `NotSignedUp`, and CloudFormation/API Gateway remain blocked. AWS's account-activation guidance says service activation can take up to 24 hours; check the activation email and the incomplete signup page before opening support.
+
 [AWS's official account-activation guide](https://repost.aws/knowledge-center/create-and-activate-aws-account) says activation typically takes minutes but can take up to 24 hours, and AWS sends a confirmation email. It recommends completing signup steps, checking payment/identity verification and requests for additional information, and contacting AWS Support if issues persist.
 
 ## Next steps
